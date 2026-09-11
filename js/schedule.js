@@ -161,6 +161,9 @@ async function loadAndRender() {
   const genPanel = document.getElementById("generatePreviewPanel");
   genPanel.style.display = "none";
   genPanel.innerHTML = "";
+  const autoFixPanel = document.getElementById("autoFixPreviewPanel");
+  autoFixPanel.style.display = "none";
+  autoFixPanel.innerHTML = "";
 
   const id = scheduleDocId(currentOutletId, currentWeekStart);
   const existing = await getItem("schedules", id);
@@ -604,6 +607,256 @@ function renderGeneratePreview({ proposal, shortages }) {
 document.getElementById("btnGenerateSchedule").addEventListener("click", () => {
   const result = generateSchedule();
   renderGeneratePreview(result);
+});
+
+// ============================================================
+// AUTO FIX (Phase 6) = Auto Replacement + Auto Rebalance
+// Beda dengan Generate Schedule: ini TIDAK menulis ulang seluruh
+// minggu dari nol. Ini cuma menambal kekurangan pada jadwal yang
+// SUDAH ADA (hasil manual atau hasil Generate sebelumnya):
+//   1. Bersihkan shift PAGI/SIANG yang nyangkut di tanggal yang
+//      ternyata sudah jadi leave (tanpa menyentuh yang locked).
+//   2. Untuk tiap hari yang understaffed: cari pegawai yang
+//      sedang OFF & eligible (Auto Replacement).
+//   3. Kalau tidak ada yang OFF & eligible: coba tukar pegawai
+//      yang sedang kerja shift lain, lalu isi slot yang dia
+//      tinggalkan kalau ada penggantinya (Auto Rebalance).
+//   4. Kalau tetap tidak bisa: laporkan sebagai unresolved,
+//      JANGAN memaksakan (prinsip §41 di desain awal).
+// ============================================================
+
+function runAutoFix() {
+  const dates = weekDates(currentWeekStart);
+  const eligibleEmployees = employeesForOutlet(currentOutletId);
+  const outlet = outlets.find((o) => o.id === currentOutletId);
+  const pagiStart = getPagiStartTime();
+
+  const proposal = {}; // key `${employeeId}|${dateStr}` -> newType (semua utk currentOutletId)
+  const actions = [];
+  const unresolved = [];
+
+  function proposalKey(employeeId, dateStr) {
+    return `${employeeId}|${dateStr}`;
+  }
+
+  // type efektif LINTAS OUTLET dgn proposal di outlet ini ikut dipertimbangkan (utk cek jumping)
+  function typeForJumpingCheck(employeeId, dateStr) {
+    const key = proposalKey(employeeId, dateStr);
+    if (proposal[key] !== undefined) return proposal[key];
+    return anyOutletEffectiveType(employeeId, dateStr);
+  }
+
+  // type di OUTLET INI SAJA dgn proposal ikut dipertimbangkan (utk hitung staffing outlet ini)
+  function typeAtThisOutlet(employeeId, dateStr) {
+    const key = proposalKey(employeeId, dateStr);
+    if (proposal[key] !== undefined) return proposal[key];
+    const override = leaveOverride(employeeId, dateStr);
+    if (override) return override;
+    return shiftEntry(employeeId, dateStr).shiftType;
+  }
+
+  function setProposal(employeeId, dateStr, type) {
+    proposal[proposalKey(employeeId, dateStr)] = type;
+  }
+
+  // ---- Step 1: bersihkan shift lama yang bentrok dgn leave ----
+  dates.forEach((d) => {
+    const dateStr = toISODate(d);
+    eligibleEmployees.forEach((emp) => {
+      const override = leaveOverride(emp.id, dateStr);
+      const current = shiftEntry(emp.id, dateStr);
+      if (override && (current.shiftType === "PAGI" || current.shiftType === "SIANG") && !current.isLocked) {
+        setProposal(emp.id, dateStr, "OFF");
+        actions.push(`${emp.name}: dibersihkan dari shift ${current.shiftType} pada ${formatShort(d)} karena sedang ${override}.`);
+      }
+    });
+  });
+
+  // ---- Step 2: tambal kekurangan staffing hari demi hari ----
+  dates.forEach((d, dayIndex) => {
+    const dateStr = toISODate(d);
+    const dayKey = DAY_KEYS[dayIndex];
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const staffing = (isWeekend ? outlet?.staffingWeekend : outlet?.staffingWeekday) || {};
+    const minPagi = staffing.minPagi ?? 0;
+    const minSiang = staffing.minSiang ?? 0;
+
+    function countsToday() {
+      let pagi = 0, siang = 0;
+      eligibleEmployees.forEach((emp) => {
+        const t = typeAtThisOutlet(emp.id, dateStr);
+        if (t === "PAGI") pagi++;
+        if (t === "SIANG") siang++;
+      });
+      return { pagi, siang };
+    }
+
+    function isEligibleFor(emp, shiftTypeNeeded) {
+      if (leaveOverride(emp.id, dateStr)) return false;
+      const entry = shiftEntry(emp.id, dateStr);
+      if (entry.isLocked) return false;
+      if (shiftTypeNeeded === "PAGI" && !emp.canWorkPagi) return false;
+      if (shiftTypeNeeded === "SIANG" && !emp.canWorkSiang) return false;
+      if (shiftTypeNeeded === "PAGI") {
+        const prevType = typeForJumpingCheck(emp.id, toISODate(addDays(d, -1)));
+        if (prevType === "SIANG") return false; // HARD: anti-jumping
+      }
+      const avail = getAvailabilityFor(emp.id, dayKey);
+      if (avail?.status === "unavailable") return false;
+      if (shiftTypeNeeded === "PAGI" && avail?.status === "available_after" && avail.availableFromTime > pagiStart) return false;
+      return true;
+    }
+
+    function tryFillShortage(shiftTypeNeeded, minRequired) {
+      let guard = 0; // jaga-jaga supaya tidak infinite loop kalau ada bug
+      while (guard < eligibleEmployees.length + 1) {
+        guard++;
+        const { pagi, siang } = countsToday();
+        const currentCount = shiftTypeNeeded === "PAGI" ? pagi : siang;
+        if (currentCount >= minRequired) return;
+
+        // 2a. Auto Replacement: pegawai yang sedang OFF & eligible
+        const candidates = eligibleEmployees.filter(
+          (emp) => typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, shiftTypeNeeded)
+        );
+
+        if (candidates.length > 0) {
+          const chosen = candidates[0];
+          setProposal(chosen.id, dateStr, shiftTypeNeeded);
+          actions.push(`${chosen.name}: OFF → ${shiftTypeNeeded} pada ${formatShort(d)} (replacement).`);
+          continue;
+        }
+
+        // 2b. Auto Rebalance: pindahkan yang sedang kerja shift LAIN, cari backfill utk slot yg ditinggal
+        const otherType = shiftTypeNeeded === "PAGI" ? "SIANG" : "PAGI";
+        const otherMin = otherType === "PAGI" ? minPagi : minSiang;
+
+        const movable = eligibleEmployees.filter(
+          (emp) => typeAtThisOutlet(emp.id, dateStr) === otherType && isEligibleFor(emp, shiftTypeNeeded)
+        );
+
+        let rebalanced = false;
+        for (const mover of movable) {
+          const { pagi: p2, siang: s2 } = countsToday();
+          const otherCountNow = otherType === "PAGI" ? p2 : s2;
+          const wouldBeLeftBehind = otherCountNow - 1;
+
+          const backfillCandidates = eligibleEmployees.filter(
+            (emp) => emp.id !== mover.id && typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, otherType)
+          );
+
+          if (backfillCandidates.length > 0) {
+            const backfill = backfillCandidates[0];
+            setProposal(mover.id, dateStr, shiftTypeNeeded);
+            setProposal(backfill.id, dateStr, otherType);
+            actions.push(
+              `${mover.name}: ${otherType} → ${shiftTypeNeeded}, ${backfill.name}: OFF → ${otherType} pada ${formatShort(d)} (rebalance).`
+            );
+            rebalanced = true;
+            break;
+          }
+
+          if (wouldBeLeftBehind >= otherMin) {
+            setProposal(mover.id, dateStr, shiftTypeNeeded);
+            actions.push(
+              `${mover.name}: ${otherType} → ${shiftTypeNeeded} pada ${formatShort(d)} (rebalance, slot lama masih di atas minimum tanpa pengganti).`
+            );
+            rebalanced = true;
+            break;
+          }
+          // kalau tidak, coba mover berikutnya — pindahin dia akan bikin shortage baru
+        }
+
+        if (!rebalanced) {
+          unresolved.push(
+            `${formatShort(d)}: butuh ${minRequired - currentCount} lagi untuk ${shiftTypeNeeded}, tapi tidak ada kandidat replacement maupun rebalance yang valid (leave/locked/anti-jumping menghalangi semua kandidat tersisa).`
+          );
+          return;
+        }
+      }
+    }
+
+    tryFillShortage("PAGI", minPagi);
+    tryFillShortage("SIANG", minSiang);
+  });
+
+  return { proposal, actions, unresolved };
+}
+
+function renderAutoFixPreview({ proposal, actions, unresolved }) {
+  const panel = document.getElementById("autoFixPreviewPanel");
+  panel.style.display = "block";
+
+  const changeEntries = Object.keys(proposal).map((key) => {
+    const [employeeId, dateStr] = key.split("|");
+    const emp = employees.find((e) => e.id === employeeId);
+    const oldType = shiftEntry(employeeId, dateStr).shiftType;
+    return { employeeId, empName: emp ? emp.name : employeeId, dateStr, oldType, newType: proposal[key] };
+  });
+
+  if (changeEntries.length === 0 && unresolved.length === 0) {
+    panel.innerHTML = `
+      <div class="preview-box">
+        <strong>Tidak ada yang perlu ditambal.</strong> Semua shift wajib sudah terisi sesuai minimum staffing.
+      </div>`;
+    return;
+  }
+
+  const unresolvedHtml = unresolved.length
+    ? unresolved.map((s) => `<div class="check-item critical"><span class="tag">SHORTAGE</span> ${s}</div>`).join("")
+    : `<div class="check-item ok"><span class="tag">OK</span> Semua kekurangan berhasil ditambal.</div>`;
+
+  const actionsHtml = actions.length
+    ? actions.map((a) => `<div>• ${a}</div>`).join("")
+    : `<div class="help-text">Tidak ada aksi replacement/rebalance yang dilakukan.</div>`;
+
+  panel.innerHTML = `
+    <div class="preview-box">
+      <strong>Preview Auto Fix</strong>
+      <div class="help-text">Belum tersimpan. Cell yang locked tidak ikut diubah atau dipakai sebagai pengganti.</div>
+      ${unresolvedHtml}
+      <div class="preview-change-list">${actionsHtml}</div>
+      <div class="preview-actions">
+        ${changeEntries.length > 0 ? '<button class="btn btn-primary btn-sm" id="btnApplyAutoFix">Terapkan Perubahan</button>' : ""}
+        <button class="btn btn-sm" id="btnCancelAutoFix">Batal</button>
+      </div>
+    </div>`;
+
+  document.getElementById("btnCancelAutoFix").addEventListener("click", () => {
+    panel.style.display = "none";
+    panel.innerHTML = "";
+  });
+
+  const applyBtn = document.getElementById("btnApplyAutoFix");
+  if (applyBtn) {
+    applyBtn.addEventListener("click", async () => {
+      try {
+        for (const entry of changeEntries) {
+          const id = shiftDocId(currentOutletId, currentWeekStart, entry.employeeId, entry.dateStr);
+          await setItem("schedule_shifts", id, {
+            scheduleId: scheduleDocId(currentOutletId, currentWeekStart),
+            outletId: currentOutletId,
+            employeeId: entry.employeeId,
+            date: entry.dateStr,
+            shiftType: entry.newType,
+            source: "auto_fix",
+          });
+        }
+        panel.style.display = "none";
+        panel.innerHTML = "";
+        document.getElementById("checkResultsPanel").style.display = "none";
+        document.getElementById("btnMarkReady").style.display = "none";
+      } catch (err) {
+        console.error(err);
+        alert("Gagal menerapkan Auto Fix. Cek console untuk detail.");
+      }
+    });
+  }
+}
+
+document.getElementById("btnAutoFix").addEventListener("click", () => {
+  const result = runAutoFix();
+  renderAutoFixPreview(result);
 });
 
 document.getElementById("btnCheckSchedule").addEventListener("click", () => {
