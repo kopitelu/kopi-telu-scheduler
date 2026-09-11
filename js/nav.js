@@ -5,7 +5,7 @@
 
 const NAV_ITEMS = [
   { label: "Dashboard", href: "index.html", key: "dashboard", enabled: true },
-  { label: "Schedule", href: "#", key: "schedule", enabled: false },
+  { label: "Schedule", href: "schedule.html", key: "schedule", enabled: true },
   { label: "Employees", href: "employees.html", key: "employees", enabled: true },
   { label: "Outlets", href: "outlets.html", key: "outlets", enabled: true },
   { label: "Shift Templates", href: "shift-templates.html", key: "shift-templates", enabled: true },
@@ -37,6 +37,6 @@ export function renderSidebar(activeKey) {
       Kopi Telu Scheduler
     </div>
     <nav class="sidebar-nav">${items}</nav>
-    <div class="sidebar-footer">Phase 1 — Master Data</div>
+    <div class="sidebar-footer">Phase 1–2 — Master Data & Schedule</div>
   `;
 }
