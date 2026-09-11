@@ -3,8 +3,110 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Dashboard — Kopi Telu Scheduler</title>
+<title>Schedule — Kopi Telu Scheduler</title>
 <link rel="stylesheet" href="css/style.css" />
+<style>
+  .schedule-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .week-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .week-label {
+    font-weight: 600;
+    font-size: 14px;
+    min-width: 190px;
+    text-align: center;
+  }
+  .schedule-table-wrapper { overflow-x: auto; }
+  table.schedule-grid { min-width: 900px; }
+  table.schedule-grid th, table.schedule-grid td {
+    text-align: center;
+  }
+  table.schedule-grid td:first-child,
+  table.schedule-grid th:first-child {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: var(--bg);
+  }
+  .day-header-name { font-size: 12px; }
+  .day-header-date { font-size: 10px; color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .shift-select {
+    width: 84px;
+    padding: 6px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .shift-select.val-OFF { background: var(--bg-soft); color: var(--text-muted); }
+  .shift-select.val-PAGI { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .shift-select.val-SIANG { background: #eaf1fb; color: #2b5faa; border-color: #2b5faa; }
+  .shift-select:disabled { opacity: 0.6; }
+
+  .shift-cell { display: flex; align-items: center; gap: 4px; justify-content: center; }
+  .lock-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px;
+    line-height: 1;
+  }
+
+  .pill-cuti { background: #fdf6e3; color: #b8860b; }
+  .pill-izin { background: #eaf1fb; color: #2b5faa; }
+  .pill-sakit { background: var(--danger-soft); color: var(--danger); }
+  .pill-off_request { background: var(--accent-soft); color: var(--accent); }
+  .pill-unavailable { background: var(--bg-soft); color: var(--text-muted); }
+
+  .check-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .check-item.critical { background: var(--danger-soft); color: var(--danger); }
+  .check-item.warning { background: var(--warning-soft); color: var(--warning); }
+  .check-item.ok { background: var(--accent-soft); color: var(--accent); }
+  .check-item .tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.06);
+    flex-shrink: 0;
+  }
+
+  .preview-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--bg-soft);
+  }
+  .preview-change-list {
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 10px 0;
+    font-size: 12px;
+  }
+  .preview-change-list div { padding: 3px 0; }
+  .preview-actions { display: flex; gap: 10px; margin-top: 10px; }
+  .arrow-old { color: var(--text-muted); text-decoration: line-through; }
+  .arrow-new { font-weight: 700; }
+</style>
 </head>
 <body>
   <div class="app-layout">
@@ -13,65 +115,55 @@
     <main class="main">
       <div class="page-header">
         <div>
-          <h1>Dashboard</h1>
-          <p>Kopi Telu Auto Shift Scheduler — Phase 1: Master Data.</p>
+          <h1>Weekly Schedule</h1>
+          <p>Input manual jadwal shift per pegawai. Auto Scheduler & validasi otomatis menyusul di phase berikutnya.</p>
         </div>
       </div>
 
       <div class="card">
-        <h2>Ringkasan</h2>
-        <div class="form-grid" id="summaryGrid">
-          <div class="form-field">
-            <label>Total Pegawai Aktif</label>
-            <div id="countEmployees" style="font-size:22px;font-weight:700;">–</div>
+        <div class="schedule-toolbar">
+          <div class="form-field" style="min-width:220px;">
+            <label>Outlet</label>
+            <select id="outletSelect"></select>
           </div>
-          <div class="form-field">
-            <label>Total Outlet</label>
-            <div id="countOutlets" style="font-size:22px;font-weight:700;">–</div>
+
+          <div class="week-nav">
+            <button class="btn btn-sm" id="btnPrevWeek">‹ Minggu Lalu</button>
+            <div class="week-label" id="weekLabel">–</div>
+            <button class="btn btn-sm" id="btnNextWeek">Minggu Depan ›</button>
+            <button class="btn btn-sm" id="btnThisWeek">Minggu Ini</button>
           </div>
-          <div class="form-field">
-            <label>Total Shift Template</label>
-            <div id="countShifts" style="font-size:22px;font-weight:700;">–</div>
+
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="pill pill-inactive" id="statusPill">DRAFT</span>
+            <button class="btn btn-sm" id="btnGenerateSchedule">⚙ Generate Schedule</button>
+            <button class="btn btn-sm" id="btnAutoFix">🩹 Auto Fix</button>
+            <button class="btn btn-sm btn-primary" id="btnCheckSchedule">Check Schedule</button>
+            <button class="btn btn-sm" id="btnMarkReady" style="display:none;">Tandai READY</button>
           </div>
         </div>
-      </div>
 
-      <div class="card">
-        <h2>Status Phase</h2>
-        <table>
-          <thead><tr><th>Phase</th><th>Isi</th><th>Status</th></tr></thead>
-          <tbody>
-            <tr><td>Phase 1</td><td>Database, Employee, Outlet, Shift Template</td><td><span class="pill pill-active">Aktif</span></td></tr>
-            <tr><td>Phase 2</td><td>Manual Weekly Schedule</td><td><span class="pill pill-active">Aktif</span></td></tr>
-            <tr><td>Phase 3</td><td>Leave, Availability, Schedule Lock</td><td><span class="pill pill-active">Aktif</span></td></tr>
-            <tr><td>Phase 4</td><td>Conflict Checker</td><td><span class="pill pill-active">Aktif</span></td></tr>
-            <tr><td>Phase 5</td><td>Auto Scheduler</td><td><span class="pill pill-active">Aktif</span></td></tr>
-            <tr><td>Phase 6</td><td>Auto Replacement, Rebalance, Auto Fix</td><td><span class="pill pill-inactive">Belum</span></td></tr>
-            <tr><td>Phase 7</td><td>Rolling OFF, Fairness</td><td><span class="pill pill-inactive">Belum</span></td></tr>
-            <tr><td>Phase 8</td><td>Dashboard, Reports, History, Export</td><td><span class="pill pill-inactive">Belum</span></td></tr>
-          </tbody>
-        </table>
+        <div id="generatePreviewPanel" style="display:none; margin-bottom:16px;"></div>
+        <div id="autoFixPreviewPanel" style="display:none; margin-bottom:16px;"></div>
+        <div id="checkResultsPanel" style="display:none; margin-bottom:16px;"></div>
+
+        <div class="schedule-table-wrapper" id="scheduleTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+
+        <div class="help-text" style="margin-top:12px;">
+          Kode: <strong>OFF</strong> = libur, <strong>PAGI</strong>/<strong>SIANG</strong> = shift kerja.
+          Perubahan tersimpan otomatis begitu kamu ganti pilihan di dropdown.
+        </div>
       </div>
     </main>
   </div>
 
   <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/schedule.js"></script>
   <script type="module">
     import { renderSidebar } from './js/nav.js';
-    import { watchCollection } from './js/firestore-service.js';
-
-    renderSidebar('dashboard');
-
-    watchCollection('employees', (items) => {
-      const active = items.filter((e) => e.status === 'active');
-      document.getElementById('countEmployees').textContent = active.length;
-    });
-    watchCollection('outlets', (items) => {
-      document.getElementById('countOutlets').textContent = items.length;
-    });
-    watchCollection('shift_templates', (items) => {
-      document.getElementById('countShifts').textContent = items.length;
-    });
+    renderSidebar('schedule');
   </script>
 </body>
 </html>
