@@ -141,6 +141,10 @@ async function loadAndRender() {
   if (!currentOutletId) return;
   updateWeekLabel();
 
+  const checkPanel = document.getElementById("checkResultsPanel");
+  checkPanel.style.display = "none";
+  document.getElementById("btnMarkReady").style.display = "none";
+
   const id = scheduleDocId(currentOutletId, currentWeekStart);
   const existing = await getItem("schedules", id);
   if (!existing) {
@@ -183,6 +187,183 @@ function leaveOverride(employeeId, dateStr) {
   );
   return match ? LEAVE_TYPE_TO_CODE[match.type] || "UNAVAILABLE" : null;
 }
+
+// Status kerja seseorang pada tanggal tsb, LINTAS OUTLET (dipakai untuk
+// cek jumping shift, hari kerja, dan hari libur — karena constraint ini
+// berlaku ke pegawainya, bukan cuma di outlet yang sedang dilihat).
+function anyOutletEffectiveType(employeeId, dateStr) {
+  const override = leaveOverride(employeeId, dateStr);
+  if (override) return override;
+  const shiftsOnDate = allShifts.filter(
+    (s) => s.employeeId === employeeId && s.date === dateStr && s.shiftType !== "OFF"
+  );
+  if (shiftsOnDate.length === 0) return "OFF";
+  return shiftsOnDate[0].shiftType;
+}
+
+const MAX_CONSECUTIVE_DEFAULT = 6; // default sementara, akan jadi setting di Phase 8
+
+function runConflictChecker() {
+  const dates = weekDates(currentWeekStart);
+  const eligibleEmployees = employeesForOutlet(currentOutletId);
+  const outlet = outlets.find((o) => o.id === currentOutletId);
+  const results = [];
+
+  // ---- 1. Staffing per hari (untuk outlet yang sedang dilihat) ----
+  dates.forEach((d) => {
+    const dateStr = toISODate(d);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const staffing = (isWeekend ? outlet?.staffingWeekend : outlet?.staffingWeekday) || {};
+
+    let pagiCount = 0;
+    let siangCount = 0;
+    eligibleEmployees.forEach((emp) => {
+      const override = leaveOverride(emp.id, dateStr);
+      const { shiftType } = shiftEntry(emp.id, dateStr);
+      const effective = override || shiftType;
+      if (effective === "PAGI") pagiCount++;
+      if (effective === "SIANG") siangCount++;
+
+      // Leave tapi masih ada shift kerja tersimpan (data lama sebelum leave diinput)
+      if (override && (shiftType === "PAGI" || shiftType === "SIANG")) {
+        results.push({
+          severity: "CRITICAL",
+          message: `${emp.name} sedang ${override} tapi masih ada data shift ${shiftType} tanggal ${formatShort(d)} (buka dropdown-nya lagi setelah leave dihapus untuk membersihkan).`,
+        });
+      }
+    });
+
+    if (staffing.minPagi != null && pagiCount < staffing.minPagi) {
+      results.push({
+        severity: "CRITICAL",
+        message: `${formatShort(d)}: Shift PAGI understaffed (${pagiCount}/${staffing.minPagi} minimum).`,
+      });
+    }
+    if (staffing.minSiang != null && siangCount < staffing.minSiang) {
+      results.push({
+        severity: "CRITICAL",
+        message: `${formatShort(d)}: Shift SIANG understaffed (${siangCount}/${staffing.minSiang} minimum).`,
+      });
+    }
+  });
+
+  // ---- 2. Double-booking lintas outlet (semua pegawai aktif, bukan cuma yg eligible di outlet ini) ----
+  dates.forEach((d) => {
+    const dateStr = toISODate(d);
+    employees.forEach((emp) => {
+      const shiftsOnDate = allShifts.filter(
+        (s) => s.employeeId === emp.id && s.date === dateStr && s.shiftType !== "OFF"
+      );
+      const distinctOutlets = new Set(shiftsOnDate.map((s) => s.outletId));
+      if (distinctOutlets.size > 1) {
+        results.push({
+          severity: "CRITICAL",
+          message: `${emp.name} terjadwal di lebih dari satu outlet pada ${formatShort(d)}.`,
+        });
+      }
+    });
+  });
+
+  // ---- 3. Jumping shift + rekap mingguan per pegawai (lintas outlet) ----
+  const dayBeforeWeek = addDays(currentWeekStart, -1);
+  employees.forEach((emp) => {
+    let workingDays = 0;
+    let offDays = 0;
+    let maxConsecutive = 0;
+    let currentConsecutive = 0;
+
+    // cek jumping mulai dari 1 hari sebelum minggu ini, supaya nyambung dgn minggu lalu
+    let prevType = anyOutletEffectiveType(emp.id, toISODate(dayBeforeWeek));
+
+    dates.forEach((d) => {
+      const dateStr = toISODate(d);
+      const effective = anyOutletEffectiveType(emp.id, dateStr);
+
+      if (prevType === "SIANG" && effective === "PAGI") {
+        results.push({
+          severity: "CRITICAL",
+          message: `${emp.name}: jumping shift terdeteksi — SIANG lalu PAGI keesokan harinya (${formatShort(d)}).`,
+        });
+      }
+
+      if (effective === "PAGI" || effective === "SIANG") {
+        workingDays++;
+        currentConsecutive++;
+        maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+      } else {
+        currentConsecutive = 0;
+        if (effective === "OFF") offDays++;
+      }
+
+      prevType = effective;
+    });
+
+    if (emp.maxDaysPerWeek && workingDays > emp.maxDaysPerWeek) {
+      results.push({
+        severity: "WARNING",
+        message: `${emp.name}: bekerja ${workingDays} hari minggu ini, melebihi maksimal ${emp.maxDaysPerWeek} hari/minggu.`,
+      });
+    }
+    if (emp.minDaysOffPerWeek && offDays < emp.minDaysOffPerWeek) {
+      results.push({
+        severity: "WARNING",
+        message: `${emp.name}: hanya dapat ${offDays} hari OFF minggu ini, di bawah minimum ${emp.minDaysOffPerWeek} hari/minggu.`,
+      });
+    }
+    if (maxConsecutive > MAX_CONSECUTIVE_DEFAULT) {
+      results.push({
+        severity: "WARNING",
+        message: `${emp.name}: bekerja ${maxConsecutive} hari berturut-turut (default maksimal ${MAX_CONSECUTIVE_DEFAULT} hari — bisa diatur di Settings nanti).`,
+      });
+    }
+  });
+
+  return results;
+}
+
+function renderCheckResults(results) {
+  const panel = document.getElementById("checkResultsPanel");
+  const criticalCount = results.filter((r) => r.severity === "CRITICAL").length;
+  const warningCount = results.filter((r) => r.severity === "WARNING").length;
+
+  panel.style.display = "block";
+
+  if (results.length === 0) {
+    panel.innerHTML = `<div class="check-item ok"><span class="tag">OK</span> Tidak ada masalah ditemukan untuk minggu & outlet ini.</div>`;
+  } else {
+    const sorted = [...results].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "CRITICAL" ? -1 : 1));
+    panel.innerHTML =
+      `<div class="help-text" style="margin-bottom:8px;">${criticalCount} critical, ${warningCount} warning</div>` +
+      sorted
+        .map(
+          (r) => `
+        <div class="check-item ${r.severity.toLowerCase()}">
+          <span class="tag">${r.severity}</span> ${r.message}
+        </div>`
+        )
+        .join("");
+  }
+
+  document.getElementById("btnMarkReady").style.display = criticalCount === 0 ? "inline-block" : "none";
+  return criticalCount;
+}
+
+document.getElementById("btnCheckSchedule").addEventListener("click", () => {
+  const results = runConflictChecker();
+  renderCheckResults(results);
+});
+
+document.getElementById("btnMarkReady").addEventListener("click", async () => {
+  const id = scheduleDocId(currentOutletId, currentWeekStart);
+  try {
+    await setItem("schedules", id, { status: "ready" });
+    statusPill.textContent = "READY";
+    statusPill.className = "pill pill-active";
+  } catch (err) {
+    console.error(err);
+    alert("Gagal mengubah status jadwal. Cek console untuk detail.");
+  }
+});
 
 function renderTable() {
   if (!currentOutletId) return;
@@ -278,6 +459,8 @@ function renderTable() {
           shiftType,
           source: "manual",
         });
+        document.getElementById("checkResultsPanel").style.display = "none";
+        document.getElementById("btnMarkReady").style.display = "none";
       } catch (err) {
         console.error(err);
         alert("Gagal menyimpan perubahan shift. Cek console untuk detail.");
