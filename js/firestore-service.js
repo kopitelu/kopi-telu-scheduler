@@ -10,6 +10,8 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  getDoc,
+  setDoc,
   onSnapshot,
   query,
   orderBy,
@@ -60,4 +62,27 @@ export async function updateItem(collectionName, id, data) {
 
 export async function deleteItem(collectionName, id) {
   return deleteDoc(doc(db, collectionName, id));
+}
+
+/**
+ * Baca satu dokumen sekali (bukan realtime). Dipakai saat kita perlu
+ * cek "apakah dokumen ini sudah ada?" sebelum membuat yang baru.
+ */
+export async function getItem(collectionName, id) {
+  const snap = await getDoc(doc(db, collectionName, id));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+/**
+ * Buat/timpa dokumen dengan ID yang KITA tentukan sendiri (bukan auto-ID).
+ * Dipakai untuk schedules & schedule_shifts supaya satu (outlet, minggu,
+ * pegawai, tanggal) selalu punya ID yang sama -> gampang di-upsert tanpa
+ * query dulu. merge=true supaya field lain yang tidak dikirim tidak hilang.
+ */
+export async function setItem(collectionName, id, data, merge = true) {
+  return setDoc(
+    doc(db, collectionName, id),
+    { ...data, updatedAt: serverTimestamp() },
+    { merge }
+  );
 }
