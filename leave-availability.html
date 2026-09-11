@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leave & Availability — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .pill-cuti { background: #fdf6e3; color: #b8860b; }
+  .pill-izin { background: #eaf1fb; color: #2b5faa; }
+  .pill-sakit { background: var(--danger-soft); color: var(--danger); }
+  .pill-off_request { background: var(--accent-soft); color: var(--accent); }
+  .pill-unavailable { background: var(--bg-soft); color: var(--text-muted); }
+
+  .avail-table select, .avail-table input[type="time"] { font-size: 12px; }
+  .avail-table td, .avail-table th { text-align: left; }
+</style>
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Leave & Availability</h1>
+          <p>Cuti/izin/sakit langsung memengaruhi halaman Schedule. Availability rutin dipakai nanti oleh Auto Scheduler.</p>
+        </div>
+      </div>
+
+      <!-- ============ LEAVE ============ -->
+      <div class="card">
+        <h2>Cuti / Izin / Sakit / OFF Request</h2>
+
+        <form id="leaveForm">
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Pegawai</label>
+              <select id="leaveEmployee" required></select>
+            </div>
+            <div class="form-field">
+              <label>Jenis</label>
+              <select id="leaveType">
+                <option value="off_request">OFF Request</option>
+                <option value="cuti">Cuti</option>
+                <option value="izin">Izin</option>
+                <option value="sakit">Sakit</option>
+                <option value="unavailable">Unavailable</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>Tanggal Mulai</label>
+              <input type="date" id="leaveStart" required />
+            </div>
+            <div class="form-field">
+              <label>Tanggal Selesai</label>
+              <input type="date" id="leaveEnd" required />
+            </div>
+            <div class="form-field full">
+              <label>Catatan</label>
+              <input type="text" id="leaveNote" placeholder="Opsional" />
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Ajukan</button>
+          </div>
+        </form>
+
+        <h2 style="margin-top:24px;">Histori Leave</h2>
+        <div id="leaveTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+      </div>
+
+      <!-- ============ AVAILABILITY ============ -->
+      <div class="card">
+        <h2>Availability Mingguan (Rutin)</h2>
+        <div class="help-text">
+          Ini untuk pola rutin tiap minggu (mis. selalu tidak bisa Selasa karena kuliah).
+          Untuk cuti/izin/sakit tanggal tertentu, gunakan form di atas.
+        </div>
+
+        <div class="form-field" style="max-width:280px; margin-bottom:16px;">
+          <label>Pilih Pegawai</label>
+          <select id="availEmployee"></select>
+        </div>
+
+        <div id="availTableWrapper">
+          <div class="empty-state">Pilih pegawai dulu.</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/leave-availability.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('leave');
+  </script>
+</body>
+</html>
