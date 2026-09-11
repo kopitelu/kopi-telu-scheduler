@@ -385,6 +385,30 @@ function getAvailabilityFor(employeeId, dayKey) {
   return availability.find((a) => a.employeeId === employeeId && a.dayOfWeek === dayKey);
 }
 
+const LOOKBACK_WEEKS = 6; // jendela histori fairness (Phase 7) — belum bisa diatur di Settings, itu Phase 8
+
+// Rekap kerja pegawai LINTAS OUTLET dalam N minggu terakhir SEBELUM minggu yang
+// sedang digenerate. Dipakai supaya rolling OFF & weekend fairness tidak cuma
+// lihat minggu ini, tapi histori beberapa minggu (sesuai prinsip di desain awal).
+function computeHistoricalCounts(employeeId) {
+  const rangeStart = addDays(currentWeekStart, -7 * LOOKBACK_WEEKS);
+  let workDays = 0;
+  let pagi = 0;
+  let siang = 0;
+  let weekendOff = 0;
+
+  for (let d = new Date(rangeStart); d < currentWeekStart; d = addDays(d, 1)) {
+    const dateStr = toISODate(d);
+    const type = anyOutletEffectiveType(employeeId, dateStr);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    if (type === "PAGI") { pagi++; workDays++; }
+    else if (type === "SIANG") { siang++; workDays++; }
+    else if (type === "OFF" && isWeekend) weekendOff++;
+  }
+
+  return { workDays, pagi, siang, weekendOff };
+}
+
 function generateSchedule() {
   const dates = weekDates(currentWeekStart);
   const eligibleEmployees = employeesForOutlet(currentOutletId);
@@ -393,8 +417,13 @@ function generateSchedule() {
 
   const proposal = {}; // proposal[employeeId][dateStr] = 'PAGI' | 'SIANG' | 'OFF'
   const finalType = {}; // dipakai internal utk cek jumping & lookahead, termasuk 1 hari sebelum minggu ini
-  const counters = {}; // fairness ringan dalam 1 minggu ini saja (histori lintas-minggu = Phase 7)
+  const counters = {}; // akumulasi selama proses generate minggu ini (ditambah ke histori di bawah)
   const shortages = [];
+
+  const hist = {}; // histori 6 minggu ke belakang per pegawai — dasar rolling OFF & weekend fairness
+  eligibleEmployees.forEach((emp) => {
+    hist[emp.id] = computeHistoricalCounts(emp.id);
+  });
 
   const dayBeforeStr = toISODate(addDays(currentWeekStart, -1));
   eligibleEmployees.forEach((emp) => {
@@ -441,14 +470,14 @@ function generateSchedule() {
 
     const prevTypeOf = (empId) => finalType[empId][toISODate(addDays(d, -1))] || "OFF";
 
-    let eligiblePagi = flexible.filter((emp) => {
+    const canDoPagi = (emp) => {
       if (!emp.canWorkPagi) return false;
       if (prevTypeOf(emp.id) === "SIANG") return false; // HARD: anti-jumping
       const avail = getAvailabilityFor(emp.id, dayKey);
       if (avail?.status === "available_after" && avail.availableFromTime > pagiStart) return false;
       return true;
-    });
-    let eligibleSiang = flexible.filter((emp) => emp.canWorkSiang);
+    };
+    const canDoSiang = (emp) => emp.canWorkSiang;
 
     // ---- Lookahead: siapa yang besok jadi satu-satunya andalan Pagi? ----
     const atRisk = new Set();
@@ -473,22 +502,47 @@ function generateSchedule() {
       }
     }
 
-    eligiblePagi = eligiblePagi.sort((a, b) => counters[a.id].pagi - counters[b.id].pagi);
-    eligibleSiang = eligibleSiang.sort((a, b) => {
-      const aRisk = atRisk.has(a.id) ? 1 : 0;
-      const bRisk = atRisk.has(b.id) ? 1 : 0;
-      if (aRisk !== bRisk) return aRisk - bRisk; // yang TIDAK at-risk didahulukan utk Siang
-      return counters[a.id].siang - counters[b.id].siang;
+    // ---- Rolling fairness: siapa yang paling "berhak" kerja hari ini? ----
+    // Skor makin RENDAH = makin diprioritaskan kerja (histori kerja sedikit,
+    // atau di weekend ini dia sudah sering dapat weekend-OFF sebelumnya).
+    function workPriorityScore(emp) {
+      const h = hist[emp.id];
+      const c = counters[emp.id];
+      let score = h.workDays + c.pagi + c.siang;
+      if (isWeekend) score -= h.weekendOff * 0.5;
+      return score;
+    }
+
+    const priorityOrder = [...flexible].sort((a, b) => workPriorityScore(a) - workPriorityScore(b));
+
+    let pagiSlotsLeft = Math.max(0, targetPagi - lockedPagiCount);
+    let siangSlotsLeft = Math.max(0, targetSiang - lockedSiangCount);
+    const assignedPagiIds = new Set();
+    const assignedSiangIds = new Set();
+
+    priorityOrder.forEach((emp) => {
+      if (pagiSlotsLeft === 0 && siangSlotsLeft === 0) return;
+
+      const eligiblePagiNow = pagiSlotsLeft > 0 && canDoPagi(emp);
+      const eligibleSiangNow = siangSlotsLeft > 0 && canDoSiang(emp) && !atRisk.has(emp.id);
+
+      if (eligiblePagiNow && eligibleSiangNow) {
+        // dua-duanya bisa -> pilih yang histori+minggu-ini-nya masih lebih rendah, utk seimbangkan Pagi vs Siang
+        const h = hist[emp.id];
+        const c = counters[emp.id];
+        const preferPagi = h.pagi + c.pagi <= h.siang + c.siang;
+        if (preferPagi) { assignedPagiIds.add(emp.id); pagiSlotsLeft--; }
+        else { assignedSiangIds.add(emp.id); siangSlotsLeft--; }
+      } else if (eligiblePagiNow) {
+        assignedPagiIds.add(emp.id);
+        pagiSlotsLeft--;
+      } else if (siangSlotsLeft > 0 && canDoSiang(emp)) {
+        // fallback: kalau ke-skip Siang gara-gara atRisk tapi ternyata tidak eligible Pagi sama sekali,
+        // tetap boleh Siang drpd nganggur percuma
+        assignedSiangIds.add(emp.id);
+        siangSlotsLeft--;
+      }
     });
-
-    const remainingPagiSlots = Math.max(0, targetPagi - lockedPagiCount);
-    const remainingSiangSlots = Math.max(0, targetSiang - lockedSiangCount);
-
-    const assignedPagi = eligiblePagi.slice(0, remainingPagiSlots);
-    const assignedPagiIds = new Set(assignedPagi.map((e) => e.id));
-    const siangPool = eligibleSiang.filter((e) => !assignedPagiIds.has(e.id));
-    const assignedSiang = siangPool.slice(0, remainingSiangSlots);
-    const assignedSiangIds = new Set(assignedSiang.map((e) => e.id));
 
     flexible.forEach((emp) => {
       let type = "OFF";
@@ -506,8 +560,8 @@ function generateSchedule() {
       }
     });
 
-    const totalPagiToday = lockedPagiCount + assignedPagi.length;
-    const totalSiangToday = lockedSiangCount + assignedSiang.length;
+    const totalPagiToday = lockedPagiCount + assignedPagiIds.size;
+    const totalSiangToday = lockedSiangCount + assignedSiangIds.size;
 
     if (totalPagiToday < minPagi) {
       shortages.push(
@@ -635,6 +689,11 @@ function runAutoFix() {
   const actions = [];
   const unresolved = [];
 
+  const hist = {}; // histori 6 minggu, dipakai sbg fairness tie-breaker saat pilih replacement/rebalance
+  eligibleEmployees.forEach((emp) => {
+    hist[emp.id] = computeHistoricalCounts(emp.id);
+  });
+
   function proposalKey(employeeId, dateStr) {
     return `${employeeId}|${dateStr}`;
   }
@@ -716,9 +775,9 @@ function runAutoFix() {
         if (currentCount >= minRequired) return;
 
         // 2a. Auto Replacement: pegawai yang sedang OFF & eligible
-        const candidates = eligibleEmployees.filter(
-          (emp) => typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, shiftTypeNeeded)
-        );
+        const candidates = eligibleEmployees
+          .filter((emp) => typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, shiftTypeNeeded))
+          .sort((a, b) => hist[a.id].workDays - hist[b.id].workDays);
 
         if (candidates.length > 0) {
           const chosen = candidates[0];
@@ -731,9 +790,9 @@ function runAutoFix() {
         const otherType = shiftTypeNeeded === "PAGI" ? "SIANG" : "PAGI";
         const otherMin = otherType === "PAGI" ? minPagi : minSiang;
 
-        const movable = eligibleEmployees.filter(
-          (emp) => typeAtThisOutlet(emp.id, dateStr) === otherType && isEligibleFor(emp, shiftTypeNeeded)
-        );
+        const movable = eligibleEmployees
+          .filter((emp) => typeAtThisOutlet(emp.id, dateStr) === otherType && isEligibleFor(emp, shiftTypeNeeded))
+          .sort((a, b) => hist[b.id].workDays - hist[a.id].workDays); // yang paling banyak kerja histori didahulukan utk dipindah (dia yg paling "mampu")
 
         let rebalanced = false;
         for (const mover of movable) {
@@ -741,9 +800,9 @@ function runAutoFix() {
           const otherCountNow = otherType === "PAGI" ? p2 : s2;
           const wouldBeLeftBehind = otherCountNow - 1;
 
-          const backfillCandidates = eligibleEmployees.filter(
-            (emp) => emp.id !== mover.id && typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, otherType)
-          );
+          const backfillCandidates = eligibleEmployees
+            .filter((emp) => emp.id !== mover.id && typeAtThisOutlet(emp.id, dateStr) === "OFF" && isEligibleFor(emp, otherType))
+            .sort((a, b) => hist[a.id].workDays - hist[b.id].workDays);
 
           if (backfillCandidates.length > 0) {
             const backfill = backfillCandidates[0];
