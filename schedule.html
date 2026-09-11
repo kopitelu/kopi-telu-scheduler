@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Schedule — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .schedule-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .week-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .week-label {
+    font-weight: 600;
+    font-size: 14px;
+    min-width: 190px;
+    text-align: center;
+  }
+  .schedule-table-wrapper { overflow-x: auto; }
+  table.schedule-grid { min-width: 900px; }
+  table.schedule-grid th, table.schedule-grid td {
+    text-align: center;
+  }
+  table.schedule-grid td:first-child,
+  table.schedule-grid th:first-child {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: var(--bg);
+  }
+  .day-header-name { font-size: 12px; }
+  .day-header-date { font-size: 10px; color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .shift-select {
+    width: 84px;
+    padding: 6px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .shift-select.val-OFF { background: var(--bg-soft); color: var(--text-muted); }
+  .shift-select.val-PAGI { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .shift-select.val-SIANG { background: #eaf1fb; color: #2b5faa; border-color: #2b5faa; }
+</style>
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Weekly Schedule</h1>
+          <p>Input manual jadwal shift per pegawai. Auto Scheduler & validasi otomatis menyusul di phase berikutnya.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="schedule-toolbar">
+          <div class="form-field" style="min-width:220px;">
+            <label>Outlet</label>
+            <select id="outletSelect"></select>
+          </div>
+
+          <div class="week-nav">
+            <button class="btn btn-sm" id="btnPrevWeek">‹ Minggu Lalu</button>
+            <div class="week-label" id="weekLabel">–</div>
+            <button class="btn btn-sm" id="btnNextWeek">Minggu Depan ›</button>
+            <button class="btn btn-sm" id="btnThisWeek">Minggu Ini</button>
+          </div>
+
+          <div>
+            <span class="pill pill-inactive" id="statusPill">DRAFT</span>
+          </div>
+        </div>
+
+        <div class="schedule-table-wrapper" id="scheduleTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+
+        <div class="help-text" style="margin-top:12px;">
+          Kode: <strong>OFF</strong> = libur, <strong>PAGI</strong>/<strong>SIANG</strong> = shift kerja.
+          Perubahan tersimpan otomatis begitu kamu ganti pilihan di dropdown.
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/schedule.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('schedule');
+  </script>
+</body>
+</html>
