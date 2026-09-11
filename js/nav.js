@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { label: "Employees", href: "employees.html", key: "employees", enabled: true },
   { label: "Outlets", href: "outlets.html", key: "outlets", enabled: true },
   { label: "Shift Templates", href: "shift-templates.html", key: "shift-templates", enabled: true },
-  { label: "Leave & Availability", href: "#", key: "leave", enabled: false },
+  { label: "Leave & Availability", href: "leave-availability.html", key: "leave", enabled: true },
   { label: "Workload", href: "#", key: "workload", enabled: false },
   { label: "Fairness", href: "#", key: "fairness", enabled: false },
   { label: "History", href: "#", key: "history", enabled: false },
@@ -37,6 +37,6 @@ export function renderSidebar(activeKey) {
       Kopi Telu Scheduler
     </div>
     <nav class="sidebar-nav">${items}</nav>
-    <div class="sidebar-footer">Phase 1–2 — Master Data & Schedule</div>
+    <div class="sidebar-footer">Phase 1–3 — Master Data, Schedule, Leave</div>
   `;
 }
