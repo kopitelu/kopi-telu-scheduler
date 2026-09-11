@@ -89,6 +89,23 @@
     background: rgba(0,0,0,0.06);
     flex-shrink: 0;
   }
+
+  .preview-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--bg-soft);
+  }
+  .preview-change-list {
+    max-height: 260px;
+    overflow-y: auto;
+    margin: 10px 0;
+    font-size: 12px;
+  }
+  .preview-change-list div { padding: 3px 0; }
+  .preview-actions { display: flex; gap: 10px; margin-top: 10px; }
+  .arrow-old { color: var(--text-muted); text-decoration: line-through; }
+  .arrow-new { font-weight: 700; }
 </style>
 </head>
 <body>
@@ -119,11 +136,13 @@
 
           <div style="display:flex; align-items:center; gap:8px;">
             <span class="pill pill-inactive" id="statusPill">DRAFT</span>
+            <button class="btn btn-sm" id="btnGenerateSchedule">⚙ Generate Schedule</button>
             <button class="btn btn-sm btn-primary" id="btnCheckSchedule">Check Schedule</button>
             <button class="btn btn-sm" id="btnMarkReady" style="display:none;">Tandai READY</button>
           </div>
         </div>
 
+        <div id="generatePreviewPanel" style="display:none; margin-bottom:16px;"></div>
         <div id="checkResultsPanel" style="display:none; margin-bottom:16px;"></div>
 
         <div class="schedule-table-wrapper" id="scheduleTableWrapper">
