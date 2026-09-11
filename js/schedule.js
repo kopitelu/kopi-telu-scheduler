@@ -29,6 +29,10 @@ let outlets = [];
 let employees = [];
 let allShifts = []; // seluruh isi collection schedule_shifts (difilter di client)
 let leaves = []; // seluruh isi collection employee_leave (difilter di client)
+let shiftTemplates = []; // dipakai untuk tahu jam mulai PAGI (availability "after jam X")
+let availability = []; // employee_availability, difilter per pegawai/hari di client
+
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 let currentOutletId = null;
 let currentWeekStart = getMonday(new Date());
 
@@ -115,6 +119,16 @@ watchCollection("employee_leave", (items) => {
   renderTable();
 });
 
+// ---------- Load shift templates (dipakai generator utk tahu jam mulai PAGI) ----------
+watchCollection("shift_templates", (items) => {
+  shiftTemplates = items;
+});
+
+// ---------- Load availability (dipakai generator, bukan buat ditampilkan di sini) ----------
+watchCollection("employee_availability", (items) => {
+  availability = items;
+});
+
 // ---------- Week navigation ----------
 document.getElementById("btnPrevWeek").addEventListener("click", () => {
   currentWeekStart = addDays(currentWeekStart, -7);
@@ -144,6 +158,9 @@ async function loadAndRender() {
   const checkPanel = document.getElementById("checkResultsPanel");
   checkPanel.style.display = "none";
   document.getElementById("btnMarkReady").style.display = "none";
+  const genPanel = document.getElementById("generatePreviewPanel");
+  genPanel.style.display = "none";
+  genPanel.innerHTML = "";
 
   const id = scheduleDocId(currentOutletId, currentWeekStart);
   const existing = await getItem("schedules", id);
@@ -347,6 +364,247 @@ function renderCheckResults(results) {
   document.getElementById("btnMarkReady").style.display = criticalCount === 0 ? "inline-block" : "none";
   return criticalCount;
 }
+
+// ============================================================
+// AUTO SCHEDULER (Phase 5)
+// Pendekatan: greedy per-hari + 1-day lookahead + fairness ringan.
+// TIDAK menyentuh cell yang locked atau yang sedang leave.
+// TIDAK langsung menulis ke Firestore -> hasil ditampilkan dulu
+// sebagai preview, admin yang klik "Terapkan" atau "Batal".
+// ============================================================
+
+function getPagiStartTime() {
+  const pagiTemplate = shiftTemplates.find((t) => (t.name || "").toUpperCase().includes("PAGI"));
+  return pagiTemplate?.startTime || "08:00";
+}
+
+function getAvailabilityFor(employeeId, dayKey) {
+  return availability.find((a) => a.employeeId === employeeId && a.dayOfWeek === dayKey);
+}
+
+function generateSchedule() {
+  const dates = weekDates(currentWeekStart);
+  const eligibleEmployees = employeesForOutlet(currentOutletId);
+  const outlet = outlets.find((o) => o.id === currentOutletId);
+  const pagiStart = getPagiStartTime();
+
+  const proposal = {}; // proposal[employeeId][dateStr] = 'PAGI' | 'SIANG' | 'OFF'
+  const finalType = {}; // dipakai internal utk cek jumping & lookahead, termasuk 1 hari sebelum minggu ini
+  const counters = {}; // fairness ringan dalam 1 minggu ini saja (histori lintas-minggu = Phase 7)
+  const shortages = [];
+
+  const dayBeforeStr = toISODate(addDays(currentWeekStart, -1));
+  eligibleEmployees.forEach((emp) => {
+    finalType[emp.id] = { [dayBeforeStr]: anyOutletEffectiveType(emp.id, dayBeforeStr) };
+    counters[emp.id] = { pagi: 0, siang: 0 };
+  });
+
+  dates.forEach((d, dayIndex) => {
+    const dateStr = toISODate(d);
+    const dayKey = DAY_KEYS[dayIndex];
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const staffing = (isWeekend ? outlet?.staffingWeekend : outlet?.staffingWeekday) || {};
+    const targetPagi = staffing.idealPagi ?? staffing.minPagi ?? 1;
+    const targetSiang = staffing.idealSiang ?? staffing.minSiang ?? 1;
+    const minPagi = staffing.minPagi ?? 0;
+    const minSiang = staffing.minSiang ?? 0;
+
+    const flexible = [];
+    let lockedPagiCount = 0;
+    let lockedSiangCount = 0;
+
+    eligibleEmployees.forEach((emp) => {
+      // Leave -> jangan disentuh sama sekali, sudah ditampilkan sbg badge
+      if (leaveOverride(emp.id, dateStr)) {
+        finalType[emp.id][dateStr] = leaveOverride(emp.id, dateStr);
+        return;
+      }
+      // Locked -> pertahankan apa adanya
+      const entry = shiftEntry(emp.id, dateStr);
+      if (entry.isLocked) {
+        finalType[emp.id][dateStr] = entry.shiftType;
+        if (entry.shiftType === "PAGI") { counters[emp.id].pagi++; lockedPagiCount++; }
+        if (entry.shiftType === "SIANG") { counters[emp.id].siang++; lockedSiangCount++; }
+        return;
+      }
+      // Availability rutin -> unavailable jadi OFF paksa
+      const avail = getAvailabilityFor(emp.id, dayKey);
+      if (avail?.status === "unavailable") {
+        finalType[emp.id][dateStr] = "OFF";
+        return;
+      }
+      flexible.push(emp);
+    });
+
+    const prevTypeOf = (empId) => finalType[empId][toISODate(addDays(d, -1))] || "OFF";
+
+    let eligiblePagi = flexible.filter((emp) => {
+      if (!emp.canWorkPagi) return false;
+      if (prevTypeOf(emp.id) === "SIANG") return false; // HARD: anti-jumping
+      const avail = getAvailabilityFor(emp.id, dayKey);
+      if (avail?.status === "available_after" && avail.availableFromTime > pagiStart) return false;
+      return true;
+    });
+    let eligibleSiang = flexible.filter((emp) => emp.canWorkSiang);
+
+    // ---- Lookahead: siapa yang besok jadi satu-satunya andalan Pagi? ----
+    const atRisk = new Set();
+    if (dayIndex < dates.length - 1) {
+      const tomorrow = dates[dayIndex + 1];
+      const tomorrowStr = toISODate(tomorrow);
+      const tomorrowKey = DAY_KEYS[dayIndex + 1];
+      const tomorrowIsWeekend = tomorrow.getDay() === 0 || tomorrow.getDay() === 6;
+      const tomorrowStaffing = (tomorrowIsWeekend ? outlet?.staffingWeekend : outlet?.staffingWeekday) || {};
+      const tomorrowTargetPagi = tomorrowStaffing.idealPagi ?? tomorrowStaffing.minPagi ?? 1;
+
+      const potentialPagiTomorrow = eligibleEmployees.filter((emp) => {
+        if (!emp.canWorkPagi) return false;
+        if (leaveOverride(emp.id, tomorrowStr)) return false;
+        const availTom = getAvailabilityFor(emp.id, tomorrowKey);
+        if (availTom?.status === "unavailable") return false;
+        if (availTom?.status === "available_after" && availTom.availableFromTime > pagiStart) return false;
+        return true;
+      });
+      if (potentialPagiTomorrow.length <= tomorrowTargetPagi) {
+        potentialPagiTomorrow.forEach((e) => atRisk.add(e.id));
+      }
+    }
+
+    eligiblePagi = eligiblePagi.sort((a, b) => counters[a.id].pagi - counters[b.id].pagi);
+    eligibleSiang = eligibleSiang.sort((a, b) => {
+      const aRisk = atRisk.has(a.id) ? 1 : 0;
+      const bRisk = atRisk.has(b.id) ? 1 : 0;
+      if (aRisk !== bRisk) return aRisk - bRisk; // yang TIDAK at-risk didahulukan utk Siang
+      return counters[a.id].siang - counters[b.id].siang;
+    });
+
+    const remainingPagiSlots = Math.max(0, targetPagi - lockedPagiCount);
+    const remainingSiangSlots = Math.max(0, targetSiang - lockedSiangCount);
+
+    const assignedPagi = eligiblePagi.slice(0, remainingPagiSlots);
+    const assignedPagiIds = new Set(assignedPagi.map((e) => e.id));
+    const siangPool = eligibleSiang.filter((e) => !assignedPagiIds.has(e.id));
+    const assignedSiang = siangPool.slice(0, remainingSiangSlots);
+    const assignedSiangIds = new Set(assignedSiang.map((e) => e.id));
+
+    flexible.forEach((emp) => {
+      let type = "OFF";
+      if (assignedPagiIds.has(emp.id)) type = "PAGI";
+      else if (assignedSiangIds.has(emp.id)) type = "SIANG";
+
+      finalType[emp.id][dateStr] = type;
+      if (type === "PAGI") counters[emp.id].pagi++;
+      if (type === "SIANG") counters[emp.id].siang++;
+
+      const currentType = shiftEntry(emp.id, dateStr).shiftType;
+      if (currentType !== type) {
+        proposal[emp.id] = proposal[emp.id] || {};
+        proposal[emp.id][dateStr] = type;
+      }
+    });
+
+    const totalPagiToday = lockedPagiCount + assignedPagi.length;
+    const totalSiangToday = lockedSiangCount + assignedSiang.length;
+
+    if (totalPagiToday < minPagi) {
+      shortages.push(
+        `${formatShort(d)}: total PAGI cuma ${totalPagiToday} (minimum ${minPagi}) — kemungkinan besar semua kandidat sedang leave/locked/kena aturan anti-jumping.`
+      );
+    }
+    if (totalSiangToday < minSiang) {
+      shortages.push(
+        `${formatShort(d)}: total SIANG cuma ${totalSiangToday} (minimum ${minSiang}) — kemungkinan besar semua kandidat sedang leave/locked/kena aturan anti-jumping.`
+      );
+    }
+  });
+
+  return { proposal, shortages };
+}
+
+function renderGeneratePreview({ proposal, shortages }) {
+  const panel = document.getElementById("generatePreviewPanel");
+  panel.style.display = "block";
+
+  const changeEntries = [];
+  Object.entries(proposal).forEach(([employeeId, byDate]) => {
+    const emp = employees.find((e) => e.id === employeeId);
+    Object.entries(byDate).forEach(([dateStr, newType]) => {
+      const oldType = shiftEntry(employeeId, dateStr).shiftType;
+      changeEntries.push({ empName: emp ? emp.name : employeeId, dateStr, oldType, newType });
+    });
+  });
+
+  if (changeEntries.length === 0) {
+    panel.innerHTML = `
+      <div class="preview-box">
+        <strong>Tidak ada perubahan.</strong> Jadwal minggu ini untuk outlet ini sudah sesuai hasil Auto Scheduler
+        (atau semua cell sedang locked/leave).
+      </div>`;
+    return;
+  }
+
+  const shortageHtml = shortages.length
+    ? shortages.map((s) => `<div class="check-item critical"><span class="tag">SHORTAGE</span> ${s}</div>`).join("")
+    : `<div class="check-item ok"><span class="tag">OK</span> Semua shift wajib berhasil terisi sesuai minimum staffing.</div>`;
+
+  const changesHtml = changeEntries
+    .sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.empName.localeCompare(b.empName))
+    .map(
+      (c) => `
+      <div>
+        <strong>${c.empName}</strong> — ${c.dateStr}:
+        <span class="arrow-old">${c.oldType}</span> → <span class="arrow-new">${c.newType}</span>
+      </div>`
+    )
+    .join("");
+
+  panel.innerHTML = `
+    <div class="preview-box">
+      <strong>Preview Auto Scheduler</strong>
+      <div class="help-text">Belum tersimpan. Cell yang locked atau sedang leave tidak ikut diubah.</div>
+      ${shortageHtml}
+      <div class="preview-change-list">${changesHtml}</div>
+      <div class="preview-actions">
+        <button class="btn btn-primary btn-sm" id="btnApplyGenerate">Terapkan Perubahan</button>
+        <button class="btn btn-sm" id="btnCancelGenerate">Batal</button>
+      </div>
+    </div>`;
+
+  document.getElementById("btnCancelGenerate").addEventListener("click", () => {
+    panel.style.display = "none";
+    panel.innerHTML = "";
+  });
+
+  document.getElementById("btnApplyGenerate").addEventListener("click", async () => {
+    try {
+      for (const [employeeId, byDate] of Object.entries(proposal)) {
+        for (const [dateStr, shiftType] of Object.entries(byDate)) {
+          const id = shiftDocId(currentOutletId, currentWeekStart, employeeId, dateStr);
+          await setItem("schedule_shifts", id, {
+            scheduleId: scheduleDocId(currentOutletId, currentWeekStart),
+            outletId: currentOutletId,
+            employeeId,
+            date: dateStr,
+            shiftType,
+            source: "auto",
+          });
+        }
+      }
+      panel.style.display = "none";
+      panel.innerHTML = "";
+      document.getElementById("checkResultsPanel").style.display = "none";
+      document.getElementById("btnMarkReady").style.display = "none";
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menerapkan hasil Auto Scheduler. Cek console untuk detail.");
+    }
+  });
+}
+
+document.getElementById("btnGenerateSchedule").addEventListener("click", () => {
+  const result = generateSchedule();
+  renderGeneratePreview(result);
+});
 
 document.getElementById("btnCheckSchedule").addEventListener("click", () => {
   const results = runConflictChecker();
