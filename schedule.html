@@ -68,6 +68,27 @@
   .pill-sakit { background: var(--danger-soft); color: var(--danger); }
   .pill-off_request { background: var(--accent-soft); color: var(--accent); }
   .pill-unavailable { background: var(--bg-soft); color: var(--text-muted); }
+
+  .check-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .check-item.critical { background: var(--danger-soft); color: var(--danger); }
+  .check-item.warning { background: var(--warning-soft); color: var(--warning); }
+  .check-item.ok { background: var(--accent-soft); color: var(--accent); }
+  .check-item .tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.06);
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -96,10 +117,14 @@
             <button class="btn btn-sm" id="btnThisWeek">Minggu Ini</button>
           </div>
 
-          <div>
+          <div style="display:flex; align-items:center; gap:8px;">
             <span class="pill pill-inactive" id="statusPill">DRAFT</span>
+            <button class="btn btn-sm btn-primary" id="btnCheckSchedule">Check Schedule</button>
+            <button class="btn btn-sm" id="btnMarkReady" style="display:none;">Tandai READY</button>
           </div>
         </div>
+
+        <div id="checkResultsPanel" style="display:none; margin-bottom:16px;"></div>
 
         <div class="schedule-table-wrapper" id="scheduleTableWrapper">
           <div class="empty-state">Memuat data...</div>
