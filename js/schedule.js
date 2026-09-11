@@ -1,5 +1,13 @@
 import { watchCollection, getItem, setItem } from "./firestore-service.js";
 
+const LEAVE_TYPE_TO_CODE = {
+  off_request: "OFF",
+  cuti: "CUTI",
+  izin: "IZIN",
+  sakit: "SAKIT",
+  unavailable: "UNAVAILABLE",
+};
+
 const DAY_DEFS = [
   { short: "Sen" },
   { short: "Sel" },
@@ -20,6 +28,7 @@ const SHIFT_OPTIONS = ["OFF", "PAGI", "SIANG"];
 let outlets = [];
 let employees = [];
 let allShifts = []; // seluruh isi collection schedule_shifts (difilter di client)
+let leaves = []; // seluruh isi collection employee_leave (difilter di client)
 let currentOutletId = null;
 let currentWeekStart = getMonday(new Date());
 
@@ -100,6 +109,12 @@ watchCollection("schedule_shifts", (items) => {
   renderTable();
 });
 
+// ---------- Load all leave records (filtered client-side per employee/date) ----------
+watchCollection("employee_leave", (items) => {
+  leaves = items;
+  renderTable();
+});
+
 // ---------- Week navigation ----------
 document.getElementById("btnPrevWeek").addEventListener("click", () => {
   currentWeekStart = addDays(currentWeekStart, -7);
@@ -152,11 +167,21 @@ function employeesForOutlet(outletId) {
   );
 }
 
-function shiftFor(employeeId, dateStr) {
+function shiftEntry(employeeId, dateStr) {
   const match = allShifts.find(
     (s) => s.outletId === currentOutletId && s.employeeId === employeeId && s.date === dateStr
   );
-  return match ? match.shiftType : "OFF";
+  return {
+    shiftType: match ? match.shiftType : "OFF",
+    isLocked: match ? !!match.isLocked : false,
+  };
+}
+
+function leaveOverride(employeeId, dateStr) {
+  const match = leaves.find(
+    (l) => l.employeeId === employeeId && l.startDate <= dateStr && dateStr <= l.endDate
+  );
+  return match ? LEAVE_TYPE_TO_CODE[match.type] || "UNAVAILABLE" : null;
 }
 
 function renderTable() {
@@ -185,15 +210,32 @@ function renderTable() {
       const cells = dates
         .map((d) => {
           const dateStr = toISODate(d);
-          const value = shiftFor(emp.id, dateStr);
+          const override = leaveOverride(emp.id, dateStr);
+
+          if (override) {
+            const pillClass = override.toLowerCase() === "off" ? "off_request" : override.toLowerCase();
+            return `
+              <td>
+                <span class="pill pill-${pillClass}" title="Dari data Leave & Availability">${override}</span>
+              </td>`;
+          }
+
+          const { shiftType: value, isLocked } = shiftEntry(emp.id, dateStr);
           const options = SHIFT_OPTIONS.map(
             (opt) => `<option value="${opt}" ${opt === value ? "selected" : ""}>${opt}</option>`
           ).join("");
+
           return `
             <td>
-              <select class="shift-select val-${value}" data-employee="${emp.id}" data-date="${dateStr}">
-                ${options}
-              </select>
+              <div class="shift-cell">
+                <select class="shift-select val-${value}" data-employee="${emp.id}" data-date="${dateStr}" ${isLocked ? "disabled" : ""}>
+                  ${options}
+                </select>
+                <button type="button" class="lock-btn" data-employee="${emp.id}" data-date="${dateStr}" data-locked="${isLocked}"
+                  title="${isLocked ? "Terkunci — klik untuk buka" : "Klik untuk kunci shift ini"}">
+                  ${isLocked ? "🔒" : "🔓"}
+                </button>
+              </div>
             </td>`;
         })
         .join("");
@@ -239,6 +281,31 @@ function renderTable() {
       } catch (err) {
         console.error(err);
         alert("Gagal menyimpan perubahan shift. Cek console untuk detail.");
+      }
+    });
+  });
+
+  tableWrapper.querySelectorAll(".lock-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const employeeId = btn.dataset.employee;
+      const dateStr = btn.dataset.date;
+      const currentlyLocked = btn.dataset.locked === "true";
+      const { shiftType } = shiftEntry(employeeId, dateStr);
+
+      const id = shiftDocId(currentOutletId, currentWeekStart, employeeId, dateStr);
+      try {
+        await setItem("schedule_shifts", id, {
+          scheduleId: scheduleDocId(currentOutletId, currentWeekStart),
+          outletId: currentOutletId,
+          employeeId,
+          date: dateStr,
+          shiftType,
+          isLocked: !currentlyLocked,
+          source: "manual",
+        });
+      } catch (err) {
+        console.error(err);
+        alert("Gagal mengubah status lock. Cek console untuk detail.");
       }
     });
   });
