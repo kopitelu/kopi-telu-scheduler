@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shift Templates — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Master Shift</h1>
+          <p>Template shift (PAGI, SIANG, dll.) beserta jam dan outlet yang menggunakannya.</p>
+        </div>
+        <button class="btn btn-primary" id="btnNewShift">+ Tambah Shift</button>
+      </div>
+
+      <div class="card" id="shiftFormCard" style="display:none;">
+        <h2 id="formTitle">Tambah Shift</h2>
+        <form id="shiftForm">
+          <input type="hidden" id="shiftId" />
+
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Nama Shift</label>
+              <input type="text" id="name" required placeholder="SHIFT PAGI" />
+            </div>
+            <div class="form-field"></div>
+
+            <div class="form-field">
+              <label>Jam Mulai</label>
+              <input type="time" id="startTime" required value="08:00" />
+            </div>
+            <div class="form-field">
+              <label>Jam Selesai</label>
+              <input type="time" id="endTime" required value="16:00" />
+            </div>
+
+            <div class="form-field">
+              <label>Break (menit)</label>
+              <input type="number" id="breakMinutes" min="0" value="60" />
+            </div>
+            <div class="form-field">
+              <label>Durasi Kerja (otomatis)</label>
+              <input type="text" id="durationDisplay" disabled />
+            </div>
+
+            <div class="form-field full">
+              <label>Outlet yang Menggunakan Shift Ini</label>
+              <div class="checkbox-group" id="outletsGroup"></div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan</button>
+            <button type="button" class="btn" id="btnCancelShift">Batal</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Daftar Shift</h2>
+        <div id="shiftTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/shift-templates.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('shift-templates');
+  </script>
+</body>
+</html>

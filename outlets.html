@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Outlets — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Master Outlet</h1>
+          <p>Jam operasional dan kebutuhan staffing per outlet.</p>
+        </div>
+        <button class="btn btn-primary" id="btnNewOutlet">+ Tambah Outlet</button>
+      </div>
+
+      <div class="card" id="outletFormCard" style="display:none;">
+        <h2 id="formTitle">Tambah Outlet</h2>
+        <form id="outletForm">
+          <input type="hidden" id="outletId" />
+
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Nama Outlet</label>
+              <input type="text" id="name" required placeholder="Sawah View" />
+            </div>
+            <div class="form-field"></div>
+
+            <div class="form-field">
+              <label>Jam Buka</label>
+              <input type="time" id="openTime" value="08:00" />
+            </div>
+            <div class="form-field">
+              <label>Jam Tutup</label>
+              <input type="time" id="closeTime" value="22:00" />
+            </div>
+
+            <div class="form-field full">
+              <label>Posisi Wajib Tersedia (pisahkan dengan koma)</label>
+              <input type="text" id="requiredPositions" placeholder="Barista, Kasir" />
+            </div>
+          </div>
+
+          <h2 style="margin-top:20px;">Staffing Weekday (Senin–Jumat)</h2>
+          <table class="mini-table">
+            <thead>
+              <tr><th></th><th>Min. Pagi</th><th>Min. Siang</th><th>Ideal Pagi</th><th>Ideal Siang</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Jumlah orang</td>
+                <td><input type="number" id="wdMinPagi" min="0" value="1" /></td>
+                <td><input type="number" id="wdMinSiang" min="0" value="1" /></td>
+                <td><input type="number" id="wdIdealPagi" min="0" value="2" /></td>
+                <td><input type="number" id="wdIdealSiang" min="0" value="2" /></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 style="margin-top:20px;">Staffing Weekend (Sabtu–Minggu)</h2>
+          <table class="mini-table">
+            <thead>
+              <tr><th></th><th>Min. Pagi</th><th>Min. Siang</th><th>Ideal Pagi</th><th>Ideal Siang</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Jumlah orang</td>
+                <td><input type="number" id="weMinPagi" min="0" value="1" /></td>
+                <td><input type="number" id="weMinSiang" min="0" value="2" /></td>
+                <td><input type="number" id="weIdealPagi" min="0" value="2" /></td>
+                <td><input type="number" id="weIdealSiang" min="0" value="3" /></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 style="margin-top:20px;">Aturan Staffing Berdasarkan Jumlah Pegawai Bekerja</h2>
+          <div class="help-text">
+            Dipakai oleh Auto Scheduler untuk menentukan berapa Pagi/Siang, tergantung berapa
+            orang yang bekerja hari itu. Tambah/hapus baris sesuai kebutuhan.
+          </div>
+          <table class="mini-table" id="headcountRuleTable">
+            <thead>
+              <tr><th>Jumlah Pegawai Kerja</th><th>Pagi</th><th>Siang</th><th></th></tr>
+            </thead>
+            <tbody id="headcountRuleBody"></tbody>
+          </table>
+          <button type="button" class="btn btn-sm" id="btnAddHeadcountRow" style="margin-top:8px;">+ Tambah Baris</button>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan</button>
+            <button type="button" class="btn" id="btnCancelOutlet">Batal</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Daftar Outlet</h2>
+        <div id="outletTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/outlets.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('outlets');
+  </script>
+</body>
+</html>

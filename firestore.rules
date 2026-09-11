@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// ============================================================
+// FIRESTORE SECURITY RULES — Phase 1
+// ============================================================
+// Phase 1 belum punya sistem login/role, jadi rule ini masih
+// terbuka untuk siapa saja yang tahu URL project (TIDAK aman
+// untuk production jangka panjang — hanya untuk development
+// awal & testing bareng-bareng).
+//
+// SEBELUM PUBLISH KE PEGAWAI / PUBLIC:
+// tambahkan Firebase Authentication + ganti "allow read, write: if true"
+// menjadi cek role (mis. hanya admin/owner yang boleh write ke
+// employees/outlets/shift_templates).
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /employees/{employeeId} {
+      allow read, write: if true; // TODO: ganti setelah ada Auth
+    }
+
+    match /outlets/{outletId} {
+      allow read, write: if true; // TODO: ganti setelah ada Auth
+    }
+
+    match /shift_templates/{shiftId} {
+      allow read, write: if true; // TODO: ganti setelah ada Auth
+    }
+
+    // Collection Phase berikutnya (belum dipakai, disiapkan agar
+    // deploy rules tidak perlu diubah tiap phase baru):
+    match /schedules/{id} { allow read, write: if true; }
+    match /schedule_shifts/{id} { allow read, write: if true; }
+    match /schedule_locks/{id} { allow read, write: if true; }
+    match /employee_leave/{id} { allow read, write: if true; }
+    match /employee_availability/{id} { allow read, write: if true; }
+    match /scheduling_rules/{id} { allow read, write: if true; }
+    match /employee_shift_history/{id} { allow read, write: if true; }
+    match /employee_off_history/{id} { allow read, write: if true; }
+    match /employee_workload_history/{id} { allow read, write: if true; }
+  }
+}

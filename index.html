@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Dashboard</h1>
+          <p>Kopi Telu Auto Shift Scheduler — Phase 1: Master Data.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Ringkasan</h2>
+        <div class="form-grid" id="summaryGrid">
+          <div class="form-field">
+            <label>Total Pegawai Aktif</label>
+            <div id="countEmployees" style="font-size:22px;font-weight:700;">–</div>
+          </div>
+          <div class="form-field">
+            <label>Total Outlet</label>
+            <div id="countOutlets" style="font-size:22px;font-weight:700;">–</div>
+          </div>
+          <div class="form-field">
+            <label>Total Shift Template</label>
+            <div id="countShifts" style="font-size:22px;font-weight:700;">–</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Status Phase</h2>
+        <table>
+          <thead><tr><th>Phase</th><th>Isi</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Phase 1</td><td>Database, Employee, Outlet, Shift Template</td><td><span class="pill pill-active">Aktif</span></td></tr>
+            <tr><td>Phase 2</td><td>Manual Weekly Schedule</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 3</td><td>Leave, Availability, Schedule Lock</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 4</td><td>Conflict Checker</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 5</td><td>Auto Scheduler</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 6</td><td>Auto Replacement, Rebalance, Auto Fix</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 7</td><td>Rolling OFF, Fairness</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+            <tr><td>Phase 8</td><td>Dashboard, Reports, History, Export</td><td><span class="pill pill-inactive">Belum</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    import { watchCollection } from './js/firestore-service.js';
+
+    renderSidebar('dashboard');
+
+    watchCollection('employees', (items) => {
+      const active = items.filter((e) => e.status === 'active');
+      document.getElementById('countEmployees').textContent = active.length;
+    });
+    watchCollection('outlets', (items) => {
+      document.getElementById('countOutlets').textContent = items.length;
+    });
+    watchCollection('shift_templates', (items) => {
+      document.getElementById('countShifts').textContent = items.length;
+    });
+  </script>
+</body>
+</html>

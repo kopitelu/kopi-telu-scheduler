@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Employees — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Master Pegawai</h1>
+          <p>Data pegawai, outlet yang diperbolehkan, dan batas kerja mingguan.</p>
+        </div>
+        <button class="btn btn-primary" id="btnNewEmployee">+ Tambah Pegawai</button>
+      </div>
+
+      <!-- FORM (hidden by default, tampil saat tambah/edit) -->
+      <div class="card" id="employeeFormCard" style="display:none;">
+        <h2 id="formTitle">Tambah Pegawai</h2>
+        <form id="employeeForm">
+          <input type="hidden" id="employeeId" />
+
+          <div class="form-grid">
+            <div class="form-field">
+              <label>Nama Pegawai</label>
+              <input type="text" id="name" required />
+            </div>
+
+            <div class="form-field">
+              <label>Status</label>
+              <select id="status">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label>Posisi</label>
+              <input type="text" id="position" placeholder="Barista, Kasir, dll." />
+            </div>
+
+            <div class="form-field">
+              <label>Outlet Utama</label>
+              <select id="primaryOutletId" required></select>
+            </div>
+
+            <div class="form-field full">
+              <label>Outlet Lain yang Diperbolehkan</label>
+              <div class="checkbox-group" id="allowedOutletsGroup"></div>
+            </div>
+
+            <div class="form-field">
+              <label>Maksimal Jam Kerja / Minggu</label>
+              <input type="number" id="maxHoursPerWeek" min="0" value="40" />
+            </div>
+
+            <div class="form-field">
+              <label>Maksimal Hari Kerja / Minggu</label>
+              <input type="number" id="maxDaysPerWeek" min="0" max="7" value="6" />
+            </div>
+
+            <div class="form-field">
+              <label>Minimal Hari Libur / Minggu</label>
+              <input type="number" id="minDaysOffPerWeek" min="0" max="7" value="1" />
+            </div>
+
+            <div class="form-field">
+              <label>Kapasitas Shift</label>
+              <div class="checkbox-group">
+                <label><input type="checkbox" id="canWorkPagi" checked /> Bisa Shift Pagi</label>
+                <label><input type="checkbox" id="canWorkSiang" checked /> Bisa Shift Siang</label>
+              </div>
+            </div>
+
+            <div class="form-field full">
+              <label>Preferensi Hari Libur</label>
+              <div class="checkbox-group" id="preferredDaysOffGroup"></div>
+            </div>
+
+            <div class="form-field full">
+              <label>Hari Unavailable Rutin (mis. kuliah tiap Selasa)</label>
+              <div class="help-text">Untuk cuti/izin/sakit tanggal tertentu, gunakan halaman Leave & Availability (Phase 3).</div>
+              <div class="checkbox-group" id="unavailableDaysGroup"></div>
+            </div>
+
+            <div class="form-field full">
+              <label>Catatan</label>
+              <textarea id="notes" placeholder="Catatan tambahan tentang pegawai ini"></textarea>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Simpan</button>
+            <button type="button" class="btn" id="btnCancelEmployee">Batal</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card">
+        <h2>Daftar Pegawai</h2>
+        <div id="employeeTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/employees.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('employees');
+  </script>
+</body>
+</html>
