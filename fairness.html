@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fairness — Kopi Telu Scheduler</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .fairness-table-wrapper { overflow-x: auto; }
+  table.fairness-table { min-width: 1000px; }
+  table.fairness-table th, table.fairness-table td { text-align: center; white-space: nowrap; }
+  table.fairness-table td:first-child, table.fairness-table th:first-child {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: var(--bg);
+  }
+  .badge-num { font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebar"></div>
+
+    <main class="main">
+      <div class="page-header">
+        <div>
+          <h1>Fairness Dashboard</h1>
+          <p>Rekap OFF, weekend-OFF, dan Pagi/Siang per pegawai — dihitung lintas outlet, bukan cuma minggu ini.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="help-text" id="lookbackInfo" style="margin-bottom:12px;"></div>
+        <div class="fairness-table-wrapper" id="fairnessTableWrapper">
+          <div class="empty-state">Memuat data...</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="js/nav.js"></script>
+  <script type="module" src="js/fairness.js"></script>
+  <script type="module">
+    import { renderSidebar } from './js/nav.js';
+    renderSidebar('fairness');
+  </script>
+</body>
+</html>
